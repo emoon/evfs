@@ -123,17 +123,27 @@ impl VfsDriver {
     }
 }
 
+struct Mount {
+    path: String,
+    driver: VfsDriver,
+}
+
 pub struct Evfs {
-    //mounts: HashMap<String, VfsDriver>,
+    drivers: Vec<Mount>,
     pub mounts: Vec<VfsDriver>,
 }
 
 impl Evfs {
     pub fn new() -> Evfs {
         Evfs {
+            drivers: Vec::new(),
             //mounts: HashMap::new()
             mounts: Vec::new(),
         }
+    }
+
+    pub fn install_driver(driver: VfsDriver) {
+
     }
 
     /// TODO: Error handling
