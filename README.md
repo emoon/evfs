@@ -1,4 +1,4 @@
-## evfs
+## 📁 evfs
 
 evfs is a [Virtual File System](https://en.wikipedia.org/wiki/Virtual_file_system) written in [Rust](https://www.rust-lang.org)
 
