@@ -20,7 +20,7 @@ In this code we mount a [zip file](https://en.wikipedia.org/wiki/Zip_(file_forma
 
 ```Rust
     vfs.mount("/music", "ftp://some_music_sever.com/music");
-    let handle = vfs.load("/music/awesome.flac");
+    let handle = vfs.load_file("/music/awesome.flac");
 ```
 
 evfs will (optionally) support loading over the net as well. In this case we read a file from an [FTP server](https://en.wikipedia.org/wiki/File_Transfer_Protocol)
