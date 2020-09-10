@@ -34,8 +34,3 @@ evfs is in very early development and isn't useable yet.
 # Licence
 
 evfs is licensed under the [MIT](https://en.wikipedia.org/wiki/MIT_License) licence
-
-
-
-
-The purpose of this library is to abstract loading and writing of files so the user doesn't have to implement specific version
