@@ -9,7 +9,7 @@ The purpose of this library is to allow the user to setup a virtual file system 
     let handle = vfs.load_file("/temp/some_file");
 ```
 
-The example above creates a mount `/temp` that points to `/usr/foo/temp` so when loading the file `some_file` from `/temp` it will actually write to `/usr/foo/temp/some_file`
+The example above creates a mount `/temp` that points to `/usr/foo/temp` so when loading the file `some_file` from `/temp` it will actually load from `/usr/foo/temp/some_file`
 
 ```Rust
     vfs.mount("/assets", "data/data.zip");
