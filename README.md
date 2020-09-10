@@ -1,3 +1,5 @@
+## evfs
+
 evfs is a [Virtual File System](https://en.wikipedia.org/wiki/Virtual_file_system) written in [Rust](https://www.rust-lang.org)
 
 The purpose of this library is to allow the user to setup a virtual file system that works similar to how a [POSIX](https://en.wikipedia.org/wiki/POSIX) file system works. Here are some examples
@@ -23,14 +25,14 @@ In this code we mount a [zip file](https://en.wikipedia.org/wiki/Zip_(file_forma
 
 evfs will (optionally) support loading over the net as well. In this case we read a file from an [FTP server](https://en.wikipedia.org/wiki/File_Transfer_Protocol)
 
-# Async
+## Async
 
 evfs always uses async for loading but does not rely on Rust `async` to keep things simple. When loading a file the user will always get a handle back and is responsible to check the status of it. It's also optionally possible to get the progress of how much a file has been loaded to allow updates in UIs and such.
 
-# Current status
+## Current status
 
 evfs is in very early development and isn't useable yet.
 
-# Licence
+## Licence
 
 evfs is licensed under the [MIT](https://en.wikipedia.org/wiki/MIT_License) licence
