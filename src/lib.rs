@@ -1,10 +1,14 @@
 use crossbeam_channel;
 use crossbeam_channel::unbounded;
+use threadpool_crossbeam_channel::ThreadPool;
+
 use log::{trace, error};
 use std::fs::File;
 use std::io::Read;
 use std::thread;
 use thiserror::Error;
+
+#[cfg(feature = "local-fs")] mod local_fs;
 
 pub enum RecvMsg {
     ReadProgress(f32),
