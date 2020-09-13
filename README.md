@@ -1,3 +1,5 @@
+[![Build Status](https://github.com/emoon/evfs/workflows/CI/badge.svg)](https://github.com/emoon/evfs/actions?workflow=CI)
+
 ## 📁 evfs
 
 evfs is a [Virtual File System](https://en.wikipedia.org/wiki/Virtual_file_system) written in [Rust](https://www.rust-lang.org)
