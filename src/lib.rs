@@ -192,7 +192,8 @@ impl Evfs {
                 let (thread_send, main_recv) = unbounded::<RecvMsg>();
                 let full_path = path.replace(&mount.target, &mount.source);
                 self.main_send
-                    .send(SendMsg::LoadFile(full_path.into(), driver, thread_send)).unwrap();
+                    .send(SendMsg::LoadFile(full_path.into(), driver, thread_send))
+                    .unwrap();
 
                 return Ok(Handle { recv: main_recv });
             }
