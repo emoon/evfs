@@ -87,8 +87,8 @@ fn handle_msg(msg: &SendMsg) {
 }
 
 impl Evfs {
-   #[allow(unused_mut)]
-   pub fn new() -> Evfs {
+    #[allow(unused_mut)]
+    pub fn new() -> Evfs {
         let (main_send, thread_recv) = unbounded::<SendMsg>();
 
         // Setup 2 worker threads
