@@ -162,7 +162,14 @@ impl Evfs {
     pub fn mount(&mut self, target: &str, source: &str) -> Result<(), VfsError> {
         for (i, driver) in self.drivers.iter().enumerate() {
             if driver.can_mount(target, source).is_ok() {
-                let t = std::fs::canonicalize(source)?;
+                let t;
+                // special case for ""
+                if source == "" {
+                    t = std::env::current_dir()?;
+                } else {
+                    t = std::fs::canonicalize(source)?;
+                }
+
                 let full_path = t.to_string_lossy();
                 self.mounts.push(Mount {
                     target: target.into(),
@@ -204,7 +211,7 @@ mod tests {
         use std::{thread, time};
 
         let mut vfs = Evfs::new();
-        vfs.mount("/test", ".").unwrap();
+        vfs.mount("/test", "").unwrap();
         let handle = vfs.load_file("/test/Cargo.toml").unwrap();
 
         for _ in 0..10 {
