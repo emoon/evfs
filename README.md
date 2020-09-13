@@ -1,4 +1,4 @@
-[![Build Status](https://github.com/emoon/evfs/workflows/CI/badge.svg)](https://github.com/emoon/evfs/actions?workflow=CI)
+[![Build Status](https://github.com/emoon/evfs/workflows/Rust/badge.svg)](https://github.com/emoon/evfs/actions?workflow=Rust)
 
 ## 📁 evfs
 
