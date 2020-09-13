@@ -26,7 +26,9 @@ impl VfsDriver for LocalFs {
         let metadata = std::fs::metadata(source)?;
 
         if metadata.is_file() {
-            Err(VfsError::UnsupportedMount { mount: source.into() })
+            Err(VfsError::UnsupportedMount {
+                mount: source.into(),
+            })
         } else {
             Ok(())
         }
