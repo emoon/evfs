@@ -44,17 +44,47 @@ pub enum InternalError {
 
 #[derive(Error, Debug)]
 pub enum VfsError {
+    /// Errors from std::io::Error
     #[error("File Error)")]
     FileError(#[from] std::io::Error),
+    /// If trying to mount an invalid path
+    #[error("The mount point `{path}` is invalid. It has to start with a /")]
+    InvalidRootPath {
+        /// The invalid path
+        path: String,
+    },
+    /// If trying to mount an invalid path
+    #[error("The mount `{mount}` is invalid for this driver. Has to be a directory")]
+    UnsupportedMount {
+        /// The invalid path
+        mount: String,
+    },
+
+    /// If trying to mount an invalid path
+    #[error("There is no driver that supports the current mount")]
+    NoDriverSupport {},
+
+    /// If trying to mount an invalid path
+    #[error("No mount for `{path}` was found. Have you forgot to mount the path?")]
+    NoMountFound {
+        /// The invalid path
+        path: String,
+    },
 }
 
 pub struct Handle {
     pub recv: crossbeam_channel::Receiver<RecvMsg>,
 }
 
+pub struct Mount {
+    source: String,
+    target: String,
+    driver: Arc<Box<dyn VfsDriver>>,
+}
+
 pub struct Evfs {
     drivers: Vec<Box<dyn VfsDriver>>,
-    pub mounts: Vec<Arc<Box<dyn VfsDriver>>>,
+    pub mounts: Vec<Mount>,
     _msg_thread: thread::JoinHandle<()>,
     main_send: crossbeam_channel::Sender<SendMsg>,
 }
@@ -128,24 +158,40 @@ impl Evfs {
         self.drivers.push(driver);
     }
 
-    /// TODO: Error handling
-    pub fn mount(&mut self, _root: &str, filesys: &str) -> Result<(), VfsError> {
-        // TODO: select the correct vfs system here
-        self.mounts
-            .push(Arc::new(self.drivers[0].new_from_path(filesys)?));
-        Ok(())
+    /// Mount a path in the virtual file system
+    pub fn mount(&mut self, target: &str, source: &str) -> Result<(), VfsError> {
+        for (i, driver) in self.drivers.iter().enumerate() {
+            if driver.can_mount(target, source).is_ok() {
+                let t = std::fs::canonicalize(source)?;
+                let full_path = t.to_string_lossy();
+                self.mounts.push(Mount {
+                    target: target.into(),
+                    source: full_path.to_string(),
+                    driver: Arc::new(self.drivers[i].new_from_path(&full_path)?),
+                });
+
+                return Ok(());
+            }
+        }
+
+        Err(VfsError::NoDriverSupport {})
     }
 
     /// TODO: Error handling, etc, correct path, etc
-    pub fn load_file(&self, path: &str) -> Handle {
-        let (thread_send, main_recv) = unbounded::<RecvMsg>();
-        // testing
-        let driver = self.mounts[0].clone();
-        self.main_send
-            .send(SendMsg::LoadFile(path.into(), driver, thread_send))
-            .unwrap();
+    pub fn load_file(&self, path: &str) -> Result<Handle, VfsError> {
+        for mount in &self.mounts {
+            if path.starts_with(&mount.target) {
+                let driver = mount.driver.clone();
+                let (thread_send, main_recv) = unbounded::<RecvMsg>();
+                let full_path = path.replace(&mount.target, &mount.source);
+                self.main_send
+                    .send(SendMsg::LoadFile(full_path.into(), driver, thread_send)).unwrap();
 
-        Handle { recv: main_recv }
+                return Ok(Handle { recv: main_recv });
+            }
+        }
+
+        Err(VfsError::NoMountFound { path: path.into() })
     }
 }
 
@@ -158,24 +204,21 @@ mod tests {
         use std::{thread, time};
 
         let mut vfs = Evfs::new();
-        vfs.mount("/test", "").unwrap();
-        let handle = vfs.load_file("Cargo.toml");
+        vfs.mount("/test", ".").unwrap();
+        let handle = vfs.load_file("/test/Cargo.toml").unwrap();
 
         for _ in 0..10 {
             match handle.recv.try_recv() {
-                Ok(data) => {
-                    match data {
-                        RecvMsg::ReadProgress(p) => println!("ReadProgress {}", p),
-                        RecvMsg::ReadDone(_data) => {
-                            println!("File read done!");
-                            //break;
-                        }
-
-                        RecvMsg::Error(e) => {
-                            panic!("main: error {:#?}", e);
-                        }
+                Ok(data) => match data {
+                    RecvMsg::ReadProgress(p) => println!("ReadProgress {}", p),
+                    RecvMsg::ReadDone(_data) => {
+                        println!("File read done!");
                     }
-                }
+
+                    RecvMsg::Error(e) => {
+                        panic!("main: error {:#?}", e);
+                    }
+                },
 
                 _ => (),
             }

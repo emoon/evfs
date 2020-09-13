@@ -17,6 +17,21 @@ impl LocalFs {
 }
 
 impl VfsDriver for LocalFs {
+    fn can_mount(&self, _target: &str, source: &str) -> Result<(), VfsError> {
+        // special case for source of current dir
+        if source == "" {
+            return Ok(());
+        }
+
+        let metadata = std::fs::metadata(source)?;
+
+        if metadata.is_file() {
+            Err(VfsError::UnsupportedMount { mount: source.into() })
+        } else {
+            Ok(())
+        }
+    }
+
     fn new_from_path(&self, path: &str) -> Result<Box<dyn VfsDriver>, VfsError> {
         Ok(Box::new(LocalFs { root: path.into() }))
     }
