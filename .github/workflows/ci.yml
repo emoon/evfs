@@ -6,9 +6,6 @@ on:
   pull_request:
     branches: [ master ]
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   lint:
     name: Lint
@@ -27,7 +24,7 @@ jobs:
         with:
           command: fmt
           args: -- --check --color always
-  
+
   build_and_test:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -41,6 +38,7 @@ jobs:
         rust-version: ${{ matrix.rust }}
     - uses: actions/checkout@master
     - name: Run tests
-      run: |
-        cargo test --verbose
-        cargo test --features="local-fs" --verbose
+      run: cargo test
+    - name: Run tests (local-fs)
+      run: cargo test --features="local-fs"
+
