@@ -1,14 +1,16 @@
 use crossbeam_channel;
 use crossbeam_channel::unbounded;
-use threadpool_crossbeam_channel::ThreadPool;
-
-use log::{trace, error};
-use std::fs::File;
-use std::io::Read;
-use std::thread;
+use log::*;
 use thiserror::Error;
 
-#[cfg(feature = "local-fs")] mod local_fs;
+use std::sync::Arc;
+use std::thread;
+
+//mod error;
+mod vfs_driver;
+
+//use error::VfsError;
+use vfs_driver::VfsDriver;
 
 pub enum RecvMsg {
     ReadProgress(f32),
@@ -20,8 +22,17 @@ pub enum SendMsg {
     // TODO: Proper error
     //Error(String),
     /// Send messages
-    ReadFile(String),
+    LoadFile(
+        String,
+        Arc<Box<dyn VfsDriver>>,
+        crossbeam_channel::Sender<RecvMsg>,
+    ),
 }
+
+#[cfg(feature = "local-fs")]
+pub mod local_fs;
+#[cfg(feature = "local-fs")]
+pub use local_fs::LocalFs;
 
 #[derive(Error, Debug)]
 pub enum InternalError {
@@ -37,132 +48,139 @@ pub enum VfsError {
     FileError(#[from] std::io::Error),
 }
 
-
 pub struct Handle {
     pub recv: crossbeam_channel::Receiver<RecvMsg>,
 }
 
-pub struct VfsDriver {
-    send: crossbeam_channel::Sender<SendMsg>,
-    recv: crossbeam_channel::Receiver<RecvMsg>,
-    _path: String,
+pub struct Evfs {
+    drivers: Vec<Box<dyn VfsDriver>>,
+    pub mounts: Vec<Arc<Box<dyn VfsDriver>>>,
+    _msg_thread: thread::JoinHandle<()>,
+    main_send: crossbeam_channel::Sender<SendMsg>,
 }
 
-impl VfsDriver {
-    fn new(path: &str) -> VfsDriver {
-        let (thread_send, main_recv) = unbounded::<RecvMsg>();
+fn handle_error(res: Result<(), InternalError>, msg: &crossbeam_channel::Sender<RecvMsg>) {
+    if let Err(e) = res {
+        match e {
+            InternalError::FileError(e) => {
+                let file_error = format!("{:#?}", e);
+                if let Err(send_err) = msg.send(RecvMsg::Error(e.into())) {
+                    error!(
+                        "evfs: Unable to send file error {:#?} to main thread due to {:#?}",
+                        file_error, send_err
+                    );
+                }
+            }
+
+            _ => (),
+        }
+    }
+}
+
+fn handle_msg(msg: &SendMsg) {
+    match msg {
+        SendMsg::LoadFile(path, loader, msg) => {
+            let res = loader.load_file(path, msg);
+            handle_error(res, msg);
+        }
+    }
+}
+
+impl Evfs {
+   #[allow(unused_mut)]
+   pub fn new() -> Evfs {
         let (main_send, thread_recv) = unbounded::<SendMsg>();
 
-        let _ = thread::spawn(move || {
-            while let Ok(msg) = thread_recv.recv() {
-                Self::handle_msg(&msg, &thread_send);
-            }
-        });
+        // Setup 2 worker threads
+        // TODO: Configure number of worker threads
+        // and consider spliting io from unpacking
 
-        VfsDriver {
-            send: main_send,
-            recv: main_recv,
-            _path: path.into(),
+        let worker_threads = threadpool::Builder::new()
+            .num_threads(2)
+            .thread_name("evfs_worker_thread".into())
+            .build();
+
+        let msg_thread = thread::Builder::new()
+            .name("evfs_msg_thread".to_string())
+            .spawn(move || {
+                while let Ok(msg) = thread_recv.recv() {
+                    worker_threads.execute(move || {
+                        handle_msg(&msg);
+                    });
+                }
+            })
+            .unwrap();
+
+        let mut drivers: Vec<Box<dyn VfsDriver>> = Vec::new();
+
+        #[cfg(feature = "local-fs")]
+        drivers.push(Box::new(LocalFs::new()));
+
+        Evfs {
+            drivers,
+            mounts: Vec::new(),
+            _msg_thread: msg_thread,
+            main_send,
         }
     }
 
-    fn handle_msg(msg: &SendMsg, thread_send: &crossbeam_channel::Sender<RecvMsg>) {
-        let res = match msg {
-            SendMsg::ReadFile(path) => Self::read_file(thread_send.clone(), &path),
-        };
+    pub fn install_driver(&mut self, driver: Box<dyn VfsDriver>) {
+        self.drivers.push(driver);
+    }
 
-        // We need to do some special handling of errors here depending on the error in question.
-        // If we have a IoError we just propagate it back to the main thread otherwise we will just log
-        // a warning here as we have no way to notify the otherside
+    /// TODO: Error handling
+    pub fn mount(&mut self, _root: &str, filesys: &str) -> Result<(), VfsError> {
+        // TODO: select the correct vfs system here
+        self.mounts
+            .push(Arc::new(self.drivers[0].new_from_path(filesys)?));
+        Ok(())
+    }
 
-        if let Err(e) = res {
-            match e {
-                InternalError::FileError(e) => {
-                    let file_error = format!("{:#?}", e);
-                    if let Err(send_err) = thread_send.send(RecvMsg::Error(e.into())) {
-                        error!("evfs: Unable to send file error {:#?} to main thread due to {:#?}", file_error, send_err);
+    /// TODO: Error handling, etc, correct path, etc
+    pub fn load_file(&self, path: &str) -> Handle {
+        let (thread_send, main_recv) = unbounded::<RecvMsg>();
+        // testing
+        let driver = self.mounts[0].clone();
+        self.main_send
+            .send(SendMsg::LoadFile(path.into(), driver, thread_send))
+            .unwrap();
+
+        Handle { recv: main_recv }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg(feature = "local-fs")]
+    fn load_local_file() {
+        use super::*;
+        use std::{thread, time};
+
+        let mut vfs = Evfs::new();
+        vfs.mount("/test", "").unwrap();
+        let handle = vfs.load_file("Cargo.toml");
+
+        for _ in 0..10 {
+            match handle.recv.try_recv() {
+                Ok(data) => {
+                    match data {
+                        RecvMsg::ReadProgress(p) => println!("ReadProgress {}", p),
+                        RecvMsg::ReadDone(_data) => {
+                            println!("File read done!");
+                            //break;
+                        }
+
+                        RecvMsg::Error(e) => {
+                            panic!("main: error {:#?}", e);
+                        }
                     }
                 }
 
                 _ => (),
             }
-        }
-    }
 
-    ///
-    /// Read a file to memory. Path in should be a fully resolved path. This code will still
-    /// hande if the file doesn't exist and will return an error that the other side will need to handle.
-    ///
-    fn read_file(send_msg: crossbeam_channel::Sender<RecvMsg>, path: &str) -> Result<(), InternalError> {
-        let metadata = std::fs::metadata(path)?;
-        let len = metadata.len() as usize;
-        let mut file = File::open(path)?;
-        let mut output_data = vec![0u8; len];
-
-        trace!("vfs: reading from {}", path);
-
-        // if file is small than 5 meg we just load it fully directly to memory
-        if len < 5 * 1024 * 1024 {
-            send_msg.send(RecvMsg::ReadProgress(0.0))?;
-            file.read_to_end(&mut output_data)?;
-        } else {
-            // above 5 meg we read in 10 chunks
-            let loop_count = 10;
-            let block_len = len / loop_count;
-            let mut percent = 0.0;
-            let percent_step = 1.0 / loop_count as f32;
-
-            for i in 0..loop_count {
-                let block_offset = i * block_len;
-                let read_amount = usize::min(len - block_offset, block_len);
-                file.read_exact(&mut output_data[block_offset..block_offset + read_amount])?;
-                send_msg.send(RecvMsg::ReadProgress(percent))?;
-                percent += percent_step;
-            }
-        }
-
-        send_msg.send(RecvMsg::ReadDone(output_data.into_boxed_slice()))?;
-
-        Ok(())
-    }
-}
-
-struct Mount {
-    path: String,
-    driver: VfsDriver,
-}
-
-pub struct Evfs {
-    drivers: Vec<Mount>,
-    pub mounts: Vec<VfsDriver>,
-}
-
-impl Evfs {
-    pub fn new() -> Evfs {
-        Evfs {
-            drivers: Vec::new(),
-            //mounts: HashMap::new()
-            mounts: Vec::new(),
-        }
-    }
-
-    pub fn install_driver(driver: VfsDriver) {
-
-    }
-
-    /// TODO: Error handling
-    pub fn mount(&mut self, _root: &str, filesys: &str) {
-        // TODO: select the correct vfs system here
-        self.mounts.push(VfsDriver::new(filesys));
-    }
-
-    /// TODO: Error handling, etc, correct path, etc
-    pub fn read_file(&self, path: &str) -> Handle {
-        // testing
-        let vfs = &self.mounts[0];
-        vfs.send.send(SendMsg::ReadFile(path.into())).unwrap();
-        Handle {
-            recv: vfs.recv.clone(),
+            thread::sleep(time::Duration::from_millis(10));
         }
     }
 }
