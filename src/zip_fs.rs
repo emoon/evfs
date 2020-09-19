@@ -1,7 +1,7 @@
+use crate::{EntryType, InternalError, RecvMsg, VfsDriver, VfsError};
 use std::fs::File;
-use crate::{InternalError, RecvMsg, VfsDriver, VfsError, EntryType};
-use zip;
 use std::io::Read;
+use zip;
 
 pub struct ZipFs {
     filename: String,
@@ -31,7 +31,9 @@ impl VfsDriver for ZipFs {
 
     fn new_from_path(&self, filename: &str) -> Result<Box<dyn VfsDriver>, VfsError> {
         println!("zip: new from path");
-        Ok(Box::new(ZipFs { filename: filename.into() }))
+        Ok(Box::new(ZipFs {
+            filename: filename.into(),
+        }))
     }
 
     ///
@@ -78,24 +80,23 @@ impl VfsDriver for ZipFs {
 
     /// This is used to figure out if a certain mount can be done
     fn has_entry(&self, path: &str) -> EntryType {
-    	// TODO: Fix unwrap
+        // TODO: Fix unwrap
         let read_file = File::open(&self.filename).unwrap();
         let mut archive = zip::ZipArchive::new(read_file).unwrap();
         if archive.by_name(path).is_ok() {
-        	EntryType::File
+            EntryType::File
         } else {
-        	EntryType::NotFound
+            EntryType::NotFound
         }
-	}
+    }
 
     // local fs can't decompress anything
     fn can_decompress(&self, _data: &[u8]) -> bool {
-    	false
+        false
     }
 
-	// local fs support any file ext
+    // local fs support any file ext
     fn supports_file_ext(&self, file_ext: &str) -> bool {
-    	file_ext == "zip"
+        file_ext == "zip"
     }
 }
-

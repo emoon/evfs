@@ -3,9 +3,9 @@ use crate::{InternalError, VfsError};
 
 #[derive(Eq, PartialEq)]
 pub enum EntryType {
-	File,
-	Directory,
-	NotFound,
+    File,
+    Directory,
+    NotFound,
 }
 
 /// File system implementations must implement this trait

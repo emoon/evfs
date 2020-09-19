@@ -1,4 +1,4 @@
-use crate::{InternalError, RecvMsg, VfsDriver, VfsError, EntryType};
+use crate::{EntryType, InternalError, RecvMsg, VfsDriver, VfsError};
 use log::*;
 use std::fs::File;
 use std::io::Read;
@@ -47,7 +47,7 @@ impl VfsDriver for LocalFs {
         path: &str,
         send_msg: &crossbeam_channel::Sender<RecvMsg>,
     ) -> Result<Box<[u8]>, InternalError> {
-    	let path = Path::new(&self.root).join(path);
+        let path = Path::new(&self.root).join(path);
 
         let metadata = std::fs::metadata(&path)?;
         let len = metadata.len() as usize;
@@ -82,26 +82,26 @@ impl VfsDriver for LocalFs {
     }
 
     fn has_entry(&self, path: &str) -> EntryType {
-    	let path = Path::new(&self.root).join(path);
+        let path = Path::new(&self.root).join(path);
 
         if let Ok(metadata) = std::fs::metadata(path) {
-        	if metadata.is_file() {
-        		EntryType::File
-        	} else {
-        		EntryType::Directory
-        	}
+            if metadata.is_file() {
+                EntryType::File
+            } else {
+                EntryType::Directory
+            }
         } else {
-        	EntryType::NotFound
+            EntryType::NotFound
         }
     }
 
     // local fs can't decompress anything
     fn can_decompress(&self, _data: &[u8]) -> bool {
-    	false
+        false
     }
 
-	// local fs support any file ext
+    // local fs support any file ext
     fn supports_file_ext(&self, _file_ext: &str) -> bool {
-    	true
+        true
     }
 }

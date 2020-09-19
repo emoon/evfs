@@ -33,7 +33,12 @@ pub enum SendMsg {
     // TODO: Proper error
     //Error(String),
     /// Send messages
-    LoadFile(String, Mounts, Vec<ArcDriver>, crossbeam_channel::Sender<RecvMsg>),
+    LoadFile(
+        String,
+        Mounts,
+        Vec<ArcDriver>,
+        crossbeam_channel::Sender<RecvMsg>,
+    ),
 }
 
 #[cfg(feature = "local-fs")]
@@ -122,7 +127,7 @@ pub struct Evfs {
 
 fn handle_error(res: Result<(), InternalError>, msg: &crossbeam_channel::Sender<RecvMsg>) {
     if let Err(e) = res {
-    	println!("error {:#?}", e);
+        println!("error {:#?}", e);
         match e {
             InternalError::FileError(e) => {
                 let file_error = format!("{:#?}", e);
@@ -183,22 +188,26 @@ fn find_entry(driver: &ArcDriver, path: &str) -> (usize, EntryType) {
         }
     }
 
-	(0, EntryType::NotFound)
+    (0, EntryType::NotFound)
 }
 
-fn find_driver(current_path: &str, file_data: &[u8], drivers: &Vec<ArcDriver>) -> Option<ArcDriver> {
-	// TODO: Figure out how to deal with finding by data or ext
-	for driver in drivers {
-		if driver.supports_file_ext(current_path) {
-			return Some(driver.clone());
-		}
+fn find_driver(
+    current_path: &str,
+    file_data: &[u8],
+    drivers: &Vec<ArcDriver>,
+) -> Option<ArcDriver> {
+    // TODO: Figure out how to deal with finding by data or ext
+    for driver in drivers {
+        if driver.supports_file_ext(current_path) {
+            return Some(driver.clone());
+        }
 
-		if driver.can_decompress(file_data) {
-			return Some(driver.clone());
-		}
-	}
+        if driver.can_decompress(file_data) {
+            return Some(driver.clone());
+        }
+    }
 
-	None
+    None
 }
 
 fn load_file(
@@ -207,51 +216,63 @@ fn load_file(
     drivers: &Vec<ArcDriver>,
     send_msg: &crossbeam_channel::Sender<RecvMsg>,
 ) -> Result<(), InternalError> {
-	// used for "sliding window" of the path
-	let path_len = path.len();
-	let mut start_path = 0;
-	let mut end_path = path_len;
-	let mut driver = mount.driver.clone();
+    // used for "sliding window" of the path
+    let path_len = path.len();
+    let mut start_path = 0;
+    let mut end_path = path_len;
+    let mut driver = mount.driver.clone();
 
     // first strip the first pArcDriver of the path. We want to go from something like
     // this is safe to do as we have found this mount point
 
-	// max 100 depth for saftey and not lock-up this code in case of error
+    // max 100 depth for saftey and not lock-up this code in case of error
     for _ in 0..100 {
-    	let current_path = &path[start_path..end_path];
+        let current_path = &path[start_path..end_path];
 
-    	// Search for the entry with the current mount
-		let (path_size, entry_type) = find_entry(&mount.driver, current_path);
+        // Search for the entry with the current mount
+        let (path_size, entry_type) = find_entry(&mount.driver, current_path);
 
-		// Validate that some part of the path was actually found
-		match entry_type {
-			EntryType::NotFound => return Err(InternalError::PathNotFound { path: path.to_owned() }),
-			EntryType::Directory => return Err(InternalError::NotFile { path: path.to_owned() }),
-			_ => (),
-		}
+        // Validate that some part of the path was actually found
+        match entry_type {
+            EntryType::NotFound => {
+                return Err(InternalError::PathNotFound {
+                    path: path.to_owned(),
+                })
+            }
+            EntryType::Directory => {
+                return Err(InternalError::NotFile {
+                    path: path.to_owned(),
+                })
+            }
+            _ => (),
+        }
 
-		let file_data = driver.load_file(current_path, send_msg)?;
+        let file_data = driver.load_file(current_path, send_msg)?;
 
-		// if we are at the end path we can return the file
-		// TODO: Auto-detect and try to decompress
-		if end_path == path_size {
-        	send_msg.send(RecvMsg::ReadDone(file_data))?;
-        	return Ok(());
-		}
+        // if we are at the end path we can return the file
+        // TODO: Auto-detect and try to decompress
+        if end_path == path_size {
+            send_msg.send(RecvMsg::ReadDone(file_data))?;
+            return Ok(());
+        }
 
-		// if we aren't at end here we have a multifile and need to find a decompressor file tho current file
-		if let Some(new_driver) = find_driver(current_path, &file_data, drivers) {
-			driver = new_driver;
-		} else {
-			return Err(InternalError::DecompressorNotFound { path: path.to_owned() });
-		}
+        // if we aren't at end here we have a multifile and need to find a decompressor file tho current file
+        if let Some(new_driver) = find_driver(current_path, &file_data, drivers) {
+            driver = new_driver;
+        } else {
+            return Err(InternalError::DecompressorNotFound {
+                path: path.to_owned(),
+            });
+        }
 
-		// set path window
-		start_path = path_size;
-		end_path = path_len;
+        // set path window
+        start_path = path_size;
+        end_path = path_len;
     }
 
-	Err(InternalError::DecompressorNotFound { path: path.to_owned() })
+    Err(InternalError::DecompressorNotFound {
+        path: path.to_owned(),
+    })
 }
 
 fn handle_msg(msg: &SendMsg) {
@@ -261,10 +282,7 @@ fn handle_msg(msg: &SendMsg) {
             let driver_index = get_intital_mount(path, mounts);
 
             if let Some(driver_index) = driver_index {
-            	let driver = &mounts[driver_index];
-            	println!("{}", path);
-            	println!("{}", driver.target);
-            	println!("{}", driver.target.len());
+                let driver = &mounts[driver_index];
                 res = load_file(driver, &path[driver.target.len() + 1..], drivers, msg);
             } else {
                 res = Err(InternalError::InvalidMount {
