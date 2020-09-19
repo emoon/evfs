@@ -7,7 +7,7 @@ edition = "2018"
 
 [features]
 # no default features, must enable the things you need
-default = ["local-fs"]
+default = ["local-fs", "zip-fs"]
 local-fs = []
 zip-fs = ["zip"]
 

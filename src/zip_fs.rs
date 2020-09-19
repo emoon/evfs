@@ -1,42 +1,37 @@
-use crate::{InternalError, RecvMsg, VfsDriver, VfsError, EntryType};
-use log::*;
 use std::fs::File;
+use crate::{InternalError, RecvMsg, VfsDriver, VfsError, EntryType};
+use zip;
 use std::io::Read;
-use std::path::Path;
 
-#[derive(Clone)]
-pub struct LocalFs {
-    root: String,
+pub struct ZipFs {
+    filename: String,
 }
 
-impl LocalFs {
-    pub fn new() -> LocalFs {
-        LocalFs {
-            root: String::new(),
+impl ZipFs {
+    pub fn new() -> ZipFs {
+        ZipFs {
+            filename: String::new(),
         }
     }
 }
 
-impl VfsDriver for LocalFs {
+impl VfsDriver for ZipFs {
     fn can_mount(&self, _target: &str, source: &str) -> Result<(), VfsError> {
-        // special case for source of current dir
-        if source == "" {
-            return Ok(());
-        }
-
         let metadata = std::fs::metadata(source)?;
 
-        if metadata.is_file() {
+        // Currently file has to end with .zip
+        if metadata.is_file() && source.ends_with(".zip") {
+            Ok(())
+        } else {
             Err(VfsError::UnsupportedMount {
                 mount: source.into(),
             })
-        } else {
-            Ok(())
         }
     }
 
-    fn new_from_path(&self, path: &str) -> Result<Box<dyn VfsDriver>, VfsError> {
-        Ok(Box::new(LocalFs { root: path.into() }))
+    fn new_from_path(&self, filename: &str) -> Result<Box<dyn VfsDriver>, VfsError> {
+        println!("zip: new from path");
+        Ok(Box::new(ZipFs { filename: filename.into() }))
     }
 
     ///
@@ -47,21 +42,21 @@ impl VfsDriver for LocalFs {
         path: &str,
         send_msg: &crossbeam_channel::Sender<RecvMsg>,
     ) -> Result<Box<[u8]>, InternalError> {
-    	let path = Path::new(&self.root).join(path);
-
-        let metadata = std::fs::metadata(&path)?;
-        let len = metadata.len() as usize;
-        let mut file = File::open(&path)?;
+        println!("loading zip file {}", path);
+        let read_file = File::open(&self.filename)?;
+        // TODO: We should cache the archive and not reopen it
+        // TODO: Handle error better here
+        let mut archive = zip::ZipArchive::new(read_file).unwrap();
+        let mut file = archive.by_name(path).unwrap();
+        let len = file.size() as usize;
         let mut output_data = vec![0u8; len];
 
-        trace!("vfs: reading from {:#?}", path);
-
-        // if file is small than 5 meg we just load it fully directly to memory
-        if len < 5 * 1024 * 1024 {
+        // if file is small than 10k we just unpack it directly without progress
+        if len < 10 * 1024 {
             send_msg.send(RecvMsg::ReadProgress(0.0))?;
             file.read_to_end(&mut output_data)?;
         } else {
-            // above 5 meg we read in 10 chunks
+            // above 10k we read in 10 chunks
             let loop_count = 10;
             let block_len = len / loop_count;
             let mut percent = 0.0;
@@ -81,19 +76,17 @@ impl VfsDriver for LocalFs {
         Ok(output_data.into_boxed_slice())
     }
 
+    /// This is used to figure out if a certain mount can be done
     fn has_entry(&self, path: &str) -> EntryType {
-    	let path = Path::new(&self.root).join(path);
-
-        if let Ok(metadata) = std::fs::metadata(path) {
-        	if metadata.is_file() {
-        		EntryType::File
-        	} else {
-        		EntryType::Directory
-        	}
+    	// TODO: Fix unwrap
+        let read_file = File::open(&self.filename).unwrap();
+        let mut archive = zip::ZipArchive::new(read_file).unwrap();
+        if archive.by_name(path).is_ok() {
+        	EntryType::File
         } else {
         	EntryType::NotFound
         }
-    }
+	}
 
     // local fs can't decompress anything
     fn can_decompress(&self, _data: &[u8]) -> bool {
@@ -101,7 +94,8 @@ impl VfsDriver for LocalFs {
     }
 
 	// local fs support any file ext
-    fn supports_file_ext(&self, _file_ext: &str) -> bool {
-    	true
+    fn supports_file_ext(&self, file_ext: &str) -> bool {
+    	file_ext == "zip"
     }
 }
+
