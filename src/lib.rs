@@ -175,16 +175,31 @@ fn find_entry(driver: &ArcDriver, path: &str) -> (usize, EntryType) {
         return (path.len(), EntryType::File);
     }
 
-    let dir = Path::new(path);
+    let mut dir = Path::new(path);
 
-    while let Some(dir) = dir.parent() {
+    println!("find entry {:#?}", dir);
+
+    loop {
+        println!("find entry loop {:#?}", dir);
+
         let t = dir.to_string_lossy();
+
+        if t == "" {
+            break;
+        }
+
         let entry = driver.has_entry(&t);
 
         match entry {
             EntryType::File => return (t.len(), EntryType::File),
             EntryType::Directory => return (t.len(), EntryType::Directory),
             _ => (),
+        }
+
+        if let Some(new_dir) = dir.parent() {
+            dir = new_dir;
+        } else {
+            break;
         }
     }
 
@@ -225,33 +240,44 @@ fn load_file(
     // first strip the first pArcDriver of the path. We want to go from something like
     // this is safe to do as we have found this mount point
 
+    //println!("starting to load file");
+
     // max 100 depth for saftey and not lock-up this code in case of error
     for _ in 0..100 {
         let current_path = &path[start_path..end_path];
 
+        //println!("find entry");
+
         // Search for the entry with the current mount
         let (path_size, entry_type) = find_entry(&mount.driver, current_path);
+
+        //println!("end find entry");
 
         // Validate that some part of the path was actually found
         match entry_type {
             EntryType::NotFound => {
+                //println!("load_file: NotFound");
                 return Err(InternalError::PathNotFound {
                     path: path.to_owned(),
-                })
+                });
             }
             EntryType::Directory => {
+                //println!("load_file: Directory");
                 return Err(InternalError::NotFile {
                     path: path.to_owned(),
-                })
+                });
             }
             _ => (),
         }
+
+        //println!("loading file from driver");
 
         let file_data = driver.load_file(current_path, send_msg)?;
 
         // if we are at the end path we can return the file
         // TODO: Auto-detect and try to decompress
         if end_path == path_size {
+            //println!("file done");
             send_msg.send(RecvMsg::ReadDone(file_data))?;
             return Ok(());
         }
@@ -383,48 +409,15 @@ impl Evfs {
 
 #[cfg(test)]
 mod tests {
-    /*
     #[test]
     #[cfg(feature = "local-fs")]
     fn load_local_file() {
-    use super::*;
-    use std::{thread, time};
-
-    let mut vfs = Evfs::new();
-    vfs.mount("/test", "").unwrap();
-    let handle = vfs.load_file("/test/Cargo.toml").unwrap();
-
-    for _ in 0..10 {
-    match handle.recv.try_recv() {
-    Ok(data) => match data {
-    RecvMsg::ReadProgress(p) => println!("ReadProgress {}", p),
-    RecvMsg::ReadDone(_data) => {
-    println!("File read done!");
-    }
-
-    RecvMsg::Error(e) => {
-    panic!("main: error {:#?}", e);
-    }
-    },
-
-    _ => (),
-    }
-
-    thread::sleep(time::Duration::from_millis(10));
-    }
-    }
-         */
-
-    #[test]
-    #[cfg(feature = "zip-fs")]
-    fn load_zip_file() {
         use super::*;
         use std::{thread, time};
 
         let mut vfs = Evfs::new();
-        vfs.mount("/data", "").unwrap();
-        //vfs.mount("/data", "data/test_data.zip").unwrap();
-        let handle = vfs.load_file("/data/Cargo.toml");
+        vfs.mount("/test", "").unwrap();
+        let handle = vfs.load_file("/test/Cargo.toml");
 
         for _ in 0..10 {
             match handle.recv.try_recv() {
@@ -444,5 +437,45 @@ mod tests {
 
             thread::sleep(time::Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    #[cfg(feature = "zip-fs")]
+    fn load_zip_file() {
+        use super::*;
+        use hex_literal::hex;
+        use sha1::*;
+        use std::{thread, time};
+
+        let mut vfs = Evfs::new();
+        vfs.mount("/data", "data/test_data.zip").unwrap();
+        let handle = vfs.load_file("/data/text.txt");
+        let mut file_done = false;
+
+        for _ in 0..10 {
+            match handle.recv.try_recv() {
+                Ok(data) => match data {
+                    RecvMsg::ReadProgress(p) => println!("ReadProgress {}", p),
+                    RecvMsg::ReadDone(data) => {
+                        let mut hasher = Sha1::new();
+                        hasher.update(data);
+                        let hash = hasher.finalize();
+                        assert_eq!(hash[..], hex!("f8cafd925b9a7a9af2e977606d500783ba118ec0"));
+                        file_done = true;
+                    }
+
+                    RecvMsg::Error(e) => {
+                        panic!("main: error {:#?}", e);
+                    }
+                },
+
+                _ => (),
+            }
+
+            thread::sleep(time::Duration::from_millis(10));
+        }
+
+        // Make sure we actually got the data
+        assert_eq!(file_done, true);
     }
 }

@@ -4,9 +4,12 @@ version = "0.1.0"
 authors = ["Daniel Collin <daniel@collin.com>"]
 edition = "2018"
 
+[dev-dependencies]
+sha-1 = "0.9"
+hex-literal = "0.3"
 
 [features]
-# no default features, must enable the things you need
+# no default features, must enable the things you need (currently enabled to make testing easier)
 default = ["local-fs", "zip-fs"]
 local-fs = []
 zip-fs = ["zip"]

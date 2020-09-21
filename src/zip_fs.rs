@@ -30,7 +30,6 @@ impl VfsDriver for ZipFs {
     }
 
     fn new_from_path(&self, filename: &str) -> Result<Box<dyn VfsDriver>, VfsError> {
-        println!("zip: new from path");
         Ok(Box::new(ZipFs {
             filename: filename.into(),
         }))
@@ -44,7 +43,6 @@ impl VfsDriver for ZipFs {
         path: &str,
         send_msg: &crossbeam_channel::Sender<RecvMsg>,
     ) -> Result<Box<[u8]>, InternalError> {
-        println!("loading zip file {}", path);
         let read_file = File::open(&self.filename)?;
         // TODO: We should cache the archive and not reopen it
         // TODO: Handle error better here
@@ -83,6 +81,7 @@ impl VfsDriver for ZipFs {
         // TODO: Fix unwrap
         let read_file = File::open(&self.filename).unwrap();
         let mut archive = zip::ZipArchive::new(read_file).unwrap();
+
         if archive.by_name(path).is_ok() {
             EntryType::File
         } else {
