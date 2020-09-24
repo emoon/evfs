@@ -10,8 +10,9 @@ hex-literal = "0.3"
 
 [features]
 # no default features, must enable the things you need (currently enabled to make testing easier)
-default = ["local-fs", "zip-fs"]
+default = ["local-fs", "zip-fs", "http-fs"]
 local-fs = []
+http-fs = ["reqwest"]
 zip-fs = ["zip"]
 
 [dependencies]
@@ -21,4 +22,5 @@ log = "0.4"
 threadpool = "1.0"
 
 zip = { version = "0.5.7", optional = true }
+reqwest = { version = "0.10", features = ["blocking", "json"], optional = true }
 

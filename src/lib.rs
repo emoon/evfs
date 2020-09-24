@@ -51,6 +51,11 @@ pub mod zip_fs;
 #[cfg(feature = "zip-fs")]
 pub use zip_fs::ZipFs;
 
+#[cfg(feature = "http-fs")]
+pub mod http_fs;
+#[cfg(feature = "http-fs")]
+pub use http_fs::HttpFs;
+
 #[derive(Error, Debug)]
 pub enum InternalError {
     /// If trying to mount an invalid path
@@ -156,6 +161,8 @@ fn get_intital_mount(path: &str, mount_points: &Mounts) -> Option<usize> {
 
     let dir = Path::new(path);
 
+    println!("{:?}", dir);
+
     while let Some(dir) = dir.parent() {
         for (i, mount) in mount_points.iter().enumerate() {
             let t = dir.to_string_lossy();
@@ -246,7 +253,7 @@ fn load_file(
     for _ in 0..100 {
         let current_path = &path[start_path..end_path];
 
-        //println!("find entry");
+        println!("find entry");
 
         // Search for the entry with the current mount
         let (path_size, entry_type) = find_entry(&mount.driver, current_path);
@@ -256,7 +263,7 @@ fn load_file(
         // Validate that some part of the path was actually found
         match entry_type {
             EntryType::NotFound => {
-                //println!("load_file: NotFound");
+                println!("load_file: NotFound");
                 return Err(InternalError::PathNotFound {
                     path: path.to_owned(),
                 });
@@ -270,7 +277,7 @@ fn load_file(
             _ => (),
         }
 
-        //println!("loading file from driver");
+        println!("loading file from driver");
 
         let file_data = driver.load_file(current_path, send_msg)?;
 
@@ -305,7 +312,12 @@ fn handle_msg(msg: &SendMsg) {
     match msg {
         SendMsg::LoadFile(path, mounts, drivers, msg) => {
             let res;
+
+            dbg!(mounts.len());
+
             let driver_index = get_intital_mount(path, mounts);
+
+            println!("driver index {:?}", driver_index);
 
             if let Some(driver_index) = driver_index {
                 let driver = &mounts[driver_index];
@@ -355,6 +367,9 @@ impl Evfs {
         #[cfg(feature = "zip-fs")]
         drivers.push(Arc::new(Box::new(ZipFs::new())));
 
+        #[cfg(feature = "http-fs")]
+        drivers.push(Arc::new(Box::new(HttpFs::new())));
+
         Evfs {
             drivers,
             mounts: Vec::new(),
@@ -370,6 +385,7 @@ impl Evfs {
     /// Mount a path in the virtual file system
     pub fn mount(&mut self, target: &str, source: &str) -> Result<(), VfsError> {
         for (i, driver) in self.drivers.iter().enumerate() {
+			println!("testing drivers mount {} {}", target, source);
             if driver.can_mount(target, source).is_ok() {
                 let t;
                 // special case for ""
@@ -378,6 +394,8 @@ impl Evfs {
                 } else {
                     t = std::fs::canonicalize(source)?;
                 }
+
+                println!("adding mount");
 
                 let full_path = t.to_string_lossy();
                 self.mounts.push(Mount {
@@ -399,6 +417,8 @@ impl Evfs {
         let drivers = self.drivers.clone();
         let (thread_send, main_recv) = unbounded::<RecvMsg>();
 
+        println!("start loading file..");
+
         self.main_send
             .send(SendMsg::LoadFile(path.into(), mounts, drivers, thread_send))
             .unwrap();
@@ -409,6 +429,7 @@ impl Evfs {
 
 #[cfg(test)]
 mod tests {
+/*
     #[test]
     #[cfg(feature = "local-fs")]
     fn load_local_file() {
@@ -473,6 +494,46 @@ mod tests {
             }
 
             thread::sleep(time::Duration::from_millis(10));
+        }
+
+        // Make sure we actually got the data
+        assert_eq!(file_done, true);
+    }
+*/
+    #[test]
+    #[cfg(feature = "http-fs")]
+    fn load_https_file() {
+        use super::*;
+        use hex_literal::hex;
+        use sha1::*;
+        use std::{thread, time};
+
+        let mut vfs = Evfs::new();
+        vfs.mount("/data", "https://raw.githubusercontent.com/emoon/evfs/master/data").unwrap();
+        let handle = vfs.load_file("/data/text.txt");
+        let mut file_done = false;
+
+        for _ in 0..10 {
+            match handle.recv.try_recv() {
+                Ok(data) => match data {
+                    RecvMsg::ReadProgress(p) => println!("ReadProgress {}", p),
+                    RecvMsg::ReadDone(data) => {
+                        let mut hasher = Sha1::new();
+                        hasher.update(data);
+                        let hash = hasher.finalize();
+                        assert_eq!(hash[..], hex!("f8cafd925b9a7a9af2e977606d500783ba118ec0"));
+                        file_done = true;
+                    }
+
+                    RecvMsg::Error(e) => {
+                        panic!("main: error {:#?}", e);
+                    }
+                },
+
+                _ => (),
+            }
+
+            thread::sleep(time::Duration::from_millis(200));
         }
 
         // Make sure we actually got the data
