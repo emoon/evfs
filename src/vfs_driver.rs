@@ -10,6 +10,8 @@ pub enum EntryType {
 
 /// File system implementations must implement this trait
 pub trait VfsDriver: Sync + Send {
+    /// This indicates that the file system is remote (such as ftp, https) and has no local path
+    fn is_remote(&self) -> bool;
     /// This is used to figure out if a certain mount can be done
     fn has_entry(&self, path: &str) -> EntryType;
     /// Used for auto-detection of compression formats

@@ -18,6 +18,10 @@ impl LocalFs {
 }
 
 impl VfsDriver for LocalFs {
+    fn is_remote(&self) -> bool {
+        false
+    }
+
     fn can_mount(&self, _target: &str, source: &str) -> Result<(), VfsError> {
         // special case for source of current dir
         if source == "" {

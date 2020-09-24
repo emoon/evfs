@@ -1,7 +1,4 @@
 use crate::{EntryType, InternalError, RecvMsg, VfsDriver, VfsError};
-use std::fs::File;
-use std::io::Read;
-use reqwest::blocking;
 use std::path::Path;
 
 pub struct HttpFs {
@@ -10,17 +7,18 @@ pub struct HttpFs {
 
 impl HttpFs {
     pub fn new() -> HttpFs {
-        HttpFs {
-            url: String::new(),
-        }
+        HttpFs { url: String::new() }
     }
 }
 
 impl VfsDriver for HttpFs {
+    fn is_remote(&self) -> bool {
+        true
+    }
+
     fn can_mount(&self, _target: &str, source: &str) -> Result<(), VfsError> {
-    	// source has to start with http:// or https://
+        // source has to start with http:// or https://
         if source.starts_with("http://") || source.starts_with("https://") {
-        	println!("mounting http-fs");
             Ok(())
         } else {
             Err(VfsError::UnsupportedMount {
@@ -30,9 +28,7 @@ impl VfsDriver for HttpFs {
     }
 
     fn new_from_path(&self, url: &str) -> Result<Box<dyn VfsDriver>, VfsError> {
-        Ok(Box::new(HttpFs {
-            url: url.into(),
-        }))
+        Ok(Box::new(HttpFs { url: url.into() }))
     }
 
     ///
@@ -43,44 +39,16 @@ impl VfsDriver for HttpFs {
         path: &str,
         send_msg: &crossbeam_channel::Sender<RecvMsg>,
     ) -> Result<Box<[u8]>, InternalError> {
-    	let path = Path::new(&self.url).join(path);
-		let t = path.to_string_lossy();
-		let p = t.to_string();
+        let path = Path::new(&self.url).join(path);
+        let t = path.to_string_lossy();
+        let p = t.to_string();
 
-		println!("http-fs: getting from {}", t);
-    	let bytes = reqwest::blocking::get(&p).unwrap().bytes().unwrap();
+        // TODO: Proper progress
+        send_msg.send(RecvMsg::ReadProgress(0.0))?;
+        let bytes = reqwest::blocking::get(&p).unwrap().bytes().unwrap();
+        send_msg.send(RecvMsg::ReadProgress(1.0))?;
 
-        //let read_file = File::open(&self.filename)?;
-        // TODO: We should cache the archive and not reopen it
-        // TODO: Handle error better here
-        /*
-        let mut archive = zip::ZipArchive::new(read_file).unwrap();
-        let mut file = archive.by_name(path).unwrap();
-        let len = file.size() as usize;
-        let mut output_data = vec![0u8; len];
-
-        // if file is small than 10k we just unpack it directly without progress
-        if len < 10 * 1024 {
-            send_msg.send(RecvMsg::ReadProgress(0.0))?;
-            file.read_to_end(&mut output_data)?;
-        } else {
-            // above 10k we read in 10 chunks
-            let loop_count = 10;
-            let block_len = len / loop_count;
-            let mut percent = 0.0;
-            let percent_step = 1.0 / loop_count as f32;
-
-            for i in 0..loop_count {
-                let block_offset = i * block_len;
-                let read_amount = usize::min(len - block_offset, block_len);
-                file.read_exact(&mut output_data[block_offset..block_offset + read_amount])?;
-                send_msg.send(RecvMsg::ReadProgress(percent))?;
-                percent += percent_step;
-            }
-        }
-        */
-
-		// TODO: better way to do this?
+        // TODO: better way to do this?
         let mut data = vec![0; bytes.len()];
         data.copy_from_slice(bytes.as_ref());
 
@@ -90,7 +58,7 @@ impl VfsDriver for HttpFs {
     }
 
     /// This is used to figure out if a certain mount can be done
-    fn has_entry(&self, path: &str) -> EntryType {
+    fn has_entry(&self, _path: &str) -> EntryType {
         // TODO: Fix unwrap
         /*
         let read_file = File::open(&self.filename).unwrap();
@@ -104,7 +72,7 @@ impl VfsDriver for HttpFs {
         */
 
         // TODO: Currently assuming this is true
-		EntryType::File
+        EntryType::File
     }
 
     // local fs can't decompress anything
@@ -117,4 +85,3 @@ impl VfsDriver for HttpFs {
         file_ext == "zip"
     }
 }
-

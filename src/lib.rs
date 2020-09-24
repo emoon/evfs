@@ -3,6 +3,7 @@ use crossbeam_channel::unbounded;
 use log::*;
 use thiserror::Error;
 
+use std::borrow::Cow;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread;
@@ -124,7 +125,7 @@ pub struct Handle {
 }
 
 pub struct Evfs {
-    drivers: Vec<Arc<Box<dyn VfsDriver>>>,
+    drivers: Vec<ArcDriver>,
     pub mounts: Mounts,
     _msg_thread: thread::JoinHandle<()>,
     main_send: crossbeam_channel::Sender<SendMsg>,
@@ -132,7 +133,6 @@ pub struct Evfs {
 
 fn handle_error(res: Result<(), InternalError>, msg: &crossbeam_channel::Sender<RecvMsg>) {
     if let Err(e) = res {
-        println!("error {:#?}", e);
         match e {
             InternalError::FileError(e) => {
                 let file_error = format!("{:#?}", e);
@@ -161,11 +161,9 @@ fn get_intital_mount(path: &str, mount_points: &Mounts) -> Option<usize> {
 
     let dir = Path::new(path);
 
-    println!("{:?}", dir);
-
     while let Some(dir) = dir.parent() {
+        let t = dir.to_string_lossy();
         for (i, mount) in mount_points.iter().enumerate() {
-            let t = dir.to_string_lossy();
             if mount.target == t {
                 return Some(i);
             }
@@ -184,11 +182,7 @@ fn find_entry(driver: &ArcDriver, path: &str) -> (usize, EntryType) {
 
     let mut dir = Path::new(path);
 
-    println!("find entry {:#?}", dir);
-
     loop {
-        println!("find entry loop {:#?}", dir);
-
         let t = dir.to_string_lossy();
 
         if t == "" {
@@ -277,8 +271,6 @@ fn load_file(
             _ => (),
         }
 
-        println!("loading file from driver");
-
         let file_data = driver.load_file(current_path, send_msg)?;
 
         // if we are at the end path we can return the file
@@ -313,11 +305,7 @@ fn handle_msg(msg: &SendMsg) {
         SendMsg::LoadFile(path, mounts, drivers, msg) => {
             let res;
 
-            dbg!(mounts.len());
-
             let driver_index = get_intital_mount(path, mounts);
-
-            println!("driver index {:?}", driver_index);
 
             if let Some(driver_index) = driver_index {
                 let driver = &mounts[driver_index];
@@ -382,25 +370,34 @@ impl Evfs {
         self.drivers.push(driver);
     }
 
+    fn full_path<'a>(driver: &ArcDriver, source: &'a str) -> Result<Cow<'a, str>, VfsError> {
+        if driver.is_remote() {
+            Ok(Cow::Borrowed(source))
+        } else {
+            let t;
+            // special case for ""
+            if source == "" {
+                t = std::env::current_dir()?;
+            } else {
+                t = std::fs::canonicalize(source)?;
+            }
+
+            // TODO: Fix me
+            let t = t.to_str().unwrap();
+
+            Ok(Cow::Owned(t.to_owned()))
+        }
+    }
+
     /// Mount a path in the virtual file system
     pub fn mount(&mut self, target: &str, source: &str) -> Result<(), VfsError> {
         for (i, driver) in self.drivers.iter().enumerate() {
-			println!("testing drivers mount {} {}", target, source);
             if driver.can_mount(target, source).is_ok() {
-                let t;
-                // special case for ""
-                if source == "" {
-                    t = std::env::current_dir()?;
-                } else {
-                    t = std::fs::canonicalize(source)?;
-                }
+                let full_path = Self::full_path(driver, source)?;
 
-                println!("adding mount");
-
-                let full_path = t.to_string_lossy();
                 self.mounts.push(Mount {
                     target: target.into(),
-                    source: full_path.to_string(),
+                    source: full_path.to_owned().to_string(),
                     driver: Arc::new(self.drivers[i].new_from_path(&full_path)?),
                 });
 
@@ -417,8 +414,6 @@ impl Evfs {
         let drivers = self.drivers.clone();
         let (thread_send, main_recv) = unbounded::<RecvMsg>();
 
-        println!("start loading file..");
-
         self.main_send
             .send(SendMsg::LoadFile(path.into(), mounts, drivers, thread_send))
             .unwrap();
@@ -429,7 +424,6 @@ impl Evfs {
 
 #[cfg(test)]
 mod tests {
-/*
     #[test]
     #[cfg(feature = "local-fs")]
     fn load_local_file() {
@@ -499,7 +493,7 @@ mod tests {
         // Make sure we actually got the data
         assert_eq!(file_done, true);
     }
-*/
+
     #[test]
     #[cfg(feature = "http-fs")]
     fn load_https_file() {
@@ -509,7 +503,11 @@ mod tests {
         use std::{thread, time};
 
         let mut vfs = Evfs::new();
-        vfs.mount("/data", "https://raw.githubusercontent.com/emoon/evfs/master/data").unwrap();
+        vfs.mount(
+            "/data",
+            "https://raw.githubusercontent.com/emoon/evfs/master/data",
+        )
+        .unwrap();
         let handle = vfs.load_file("/data/text.txt");
         let mut file_done = false;
 
@@ -521,7 +519,7 @@ mod tests {
                         let mut hasher = Sha1::new();
                         hasher.update(data);
                         let hash = hasher.finalize();
-                        assert_eq!(hash[..], hex!("f8cafd925b9a7a9af2e977606d500783ba118ec0"));
+                        assert_eq!(hash[..], hex!("afa6fc4177cd134e532257de55ad71c9a454b640"));
                         file_done = true;
                     }
 

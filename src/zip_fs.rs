@@ -16,6 +16,10 @@ impl ZipFs {
 }
 
 impl VfsDriver for ZipFs {
+    fn is_remote(&self) -> bool {
+        false
+    }
+
     fn can_mount(&self, _target: &str, source: &str) -> Result<(), VfsError> {
         let metadata = std::fs::metadata(source)?;
 
